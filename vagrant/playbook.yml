@@ -1,0 +1,13 @@
+---
+- hosts: all
+  sudo: yes
+  tasks:
+      - name: install java dependencies
+        yum: name={{ item }} state=present
+        with_items:
+            - ant
+            - apache-ivy
+            - java-1.8.0-openjdk-devel
+        
+  roles:
+      - { role: docker }
