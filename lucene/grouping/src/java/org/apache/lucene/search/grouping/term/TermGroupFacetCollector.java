@@ -19,7 +19,9 @@ package org.apache.lucene.search.grouping.term;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import org.apache.lucene.index.AtomicReaderContext;
 import org.apache.lucene.index.SortedDocValues;
@@ -37,7 +39,7 @@ import org.apache.lucene.util.*;
  */
 public abstract class TermGroupFacetCollector extends AbstractGroupFacetCollector {
 
-  final List<GroupedFacetHit> groupedFacetHits;
+  final Set<GroupedFacetHit> groupedFacetHits;
   final SentinelIntSet segmentGroupedFacetHits;
 
   SortedDocValues groupFieldTermsIndex;
@@ -69,7 +71,7 @@ public abstract class TermGroupFacetCollector extends AbstractGroupFacetCollecto
 
   TermGroupFacetCollector(String groupField, String facetField, BytesRef facetPrefix, int initialSize) {
     super(groupField, facetField, facetPrefix);
-    groupedFacetHits = new ArrayList<>(initialSize);
+    groupedFacetHits = new HashSet<>(initialSize);
     segmentGroupedFacetHits = new SentinelIntSet(initialSize, Integer.MIN_VALUE);
   }
 
@@ -95,9 +97,6 @@ public abstract class TermGroupFacetCollector extends AbstractGroupFacetCollecto
         return;
       }
 
-      segmentTotalCount++;
-      segmentFacetCounts[facetOrd+1]++;
-
       segmentGroupedFacetHits.put(segmentGroupedFacetsIndex);
 
       BytesRef groupKey;
@@ -114,7 +113,10 @@ public abstract class TermGroupFacetCollector extends AbstractGroupFacetCollecto
         facetKey = BytesRef.deepCopyOf(facetFieldTermsIndex.lookupOrd(facetOrd));
       }
 
-      groupedFacetHits.add(new GroupedFacetHit(groupKey, facetKey));
+      if (groupedFacetHits.add(new GroupedFacetHit(groupKey, facetKey))) {
+        segmentTotalCount++;
+        segmentFacetCounts[facetOrd+1]++;
+      }
     }
 
     @Override
@@ -131,21 +133,6 @@ public abstract class TermGroupFacetCollector extends AbstractGroupFacetCollecto
       segmentTotalCount = 0;
 
       segmentGroupedFacetHits.clear();
-      for (GroupedFacetHit groupedFacetHit : groupedFacetHits) {
-        int facetOrd = groupedFacetHit.facetValue == null ? -1 : facetFieldTermsIndex.lookupTerm(groupedFacetHit.facetValue);
-        if (groupedFacetHit.facetValue != null && facetOrd < 0) {
-          continue;
-        }
-
-        int groupOrd = groupedFacetHit.groupValue == null ? -1 : groupFieldTermsIndex.lookupTerm(groupedFacetHit.groupValue);
-        if (groupedFacetHit.groupValue != null && groupOrd < 0) {
-          continue;
-        }
-
-        int segmentGroupedFacetsIndex = groupOrd * (facetFieldTermsIndex.getValueCount()+1) + facetOrd;
-        segmentGroupedFacetHits.put(segmentGroupedFacetsIndex);
-      }
-
       if (facetPrefix != null) {
         startFacetOrd = facetFieldTermsIndex.lookupTerm(facetPrefix);
         if (startFacetOrd < 0) {
@@ -211,17 +198,16 @@ public abstract class TermGroupFacetCollector extends AbstractGroupFacetCollecto
           return;
         }
 
-        segmentTotalCount++;
-        segmentFacetCounts[facetFieldNumTerms]++;
-
-        segmentGroupedFacetHits.put(segmentGroupedFacetsIndex);
         BytesRef groupKey;
         if (groupOrd == -1) {
           groupKey = null;
         } else {
           groupKey = BytesRef.deepCopyOf(groupFieldTermsIndex.lookupOrd(groupOrd));
         }
-        groupedFacetHits.add(new GroupedFacetHit(groupKey, null));
+        if (groupedFacetHits.add(new GroupedFacetHit(groupKey, null))) {
+          segmentTotalCount++;
+          segmentFacetCounts[facetFieldNumTerms]++;
+        }
         return;
       }
 
@@ -248,11 +234,6 @@ public abstract class TermGroupFacetCollector extends AbstractGroupFacetCollecto
         return;
       }
 
-      segmentTotalCount++;
-      segmentFacetCounts[facetOrd]++;
-
-      segmentGroupedFacetHits.put(segmentGroupedFacetsIndex);
-
       BytesRef groupKey;
       if (groupOrd == -1) {
         groupKey = null;
@@ -266,7 +247,10 @@ public abstract class TermGroupFacetCollector extends AbstractGroupFacetCollecto
       } else {
         facetValue = BytesRef.deepCopyOf(facetFieldDocTermOrds.lookupOrd(facetOrd));
       }
-      groupedFacetHits.add(new GroupedFacetHit(groupKey, facetValue));
+      if (groupedFacetHits.add(new GroupedFacetHit(groupKey, facetValue))) {
+        segmentTotalCount++;
+        segmentFacetCounts[facetOrd]++;
+      }
     }
 
     @Override
@@ -288,26 +272,6 @@ public abstract class TermGroupFacetCollector extends AbstractGroupFacetCollecto
       segmentTotalCount = 0;
 
       segmentGroupedFacetHits.clear();
-      for (GroupedFacetHit groupedFacetHit : groupedFacetHits) {
-        int groupOrd = groupedFacetHit.groupValue == null ? -1 : groupFieldTermsIndex.lookupTerm(groupedFacetHit.groupValue);
-        if (groupedFacetHit.groupValue != null && groupOrd < 0) {
-          continue;
-        }
-
-        int facetOrd;
-        if (groupedFacetHit.facetValue != null) {
-          if (facetOrdTermsEnum == null || !facetOrdTermsEnum.seekExact(groupedFacetHit.facetValue)) {
-            continue;
-          }
-          facetOrd = (int) facetOrdTermsEnum.ord();
-        } else {
-          facetOrd = facetFieldNumTerms;
-        }
-
-        // (facetFieldDocTermOrds.numTerms() + 1) for all possible facet values and docs not containing facet field
-        int segmentGroupedFacetsIndex = groupOrd * (facetFieldNumTerms + 1) + facetOrd;
-        segmentGroupedFacetHits.put(segmentGroupedFacetsIndex);
-      }
 
       if (facetPrefix != null) {
         TermsEnum.SeekStatus seekStatus;
@@ -376,5 +340,31 @@ class GroupedFacetHit {
   GroupedFacetHit(BytesRef groupValue, BytesRef facetValue) {
     this.groupValue = groupValue;
     this.facetValue = facetValue;
+  }
+
+  @Override
+  public int hashCode() {
+    int hash = 7;
+    hash = 37 * hash + (groupValue != null ? groupValue.hashCode() : 0);
+    hash = 37 * hash + (facetValue != null ? facetValue.hashCode() : 0);
+    return hash;
+  }
+
+  @Override
+  public boolean equals(Object obj) {
+    if (obj == null) {
+      return false;
+    }
+    if (getClass() != obj.getClass()) {
+      return false;
+    }
+    final GroupedFacetHit other = (GroupedFacetHit)obj;
+    if (groupValue != other.groupValue && (groupValue == null || ! groupValue.equals(other.groupValue))) {
+      return false;
+    }
+    if (facetValue != other.facetValue && (facetValue == null || ! facetValue.equals(other.facetValue))) {
+      return false;
+    }
+    return true;
   }
 }
